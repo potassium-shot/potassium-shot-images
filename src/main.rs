@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, io::BufWriter};
 
 use axum::{body::Body, http::header, response::Response, routing::get};
 use axum_anyhow::{ApiResult, ResultExt};
@@ -92,11 +92,10 @@ async fn get_image(
         .header(
             header::CONTENT_DISPOSITION,
             format!("{}; filename=\"{}\"", disposition, file_name),
-        )
-        .header(header::CONTENT_LENGTH, file_len.to_string());
+        );
 
     if params.require_treatment() {
-        let mut all_bytes = vec![0_u8; file_len as usize];
+        let mut all_bytes = Vec::new();
         file.read_to_end(&mut all_bytes)
             .await
             .context_internal("Reading image file before treatment")?;
@@ -105,9 +104,18 @@ async fn get_image(
             .context_internal("Decoding image data")?;
         let image = params.treat_image(image);
 
-        Ok(response.body(Body::from(image.into_bytes())).unwrap())
+        all_bytes.clear();
+
+        let encoder = image::codecs::png::PngEncoder::new(BufWriter::new(&mut all_bytes));
+        image.write_with_encoder(encoder)?;
+
+        Ok(response
+            .header(header::CONTENT_LENGTH, all_bytes.len().to_string())
+            .body(Body::from(all_bytes))
+            .unwrap())
     } else {
         Ok(response
+            .header(header::CONTENT_LENGTH, file_len.to_string())
             .body(Body::from_stream(ReaderStream::with_capacity(file, 65536)))
             .unwrap())
     }
