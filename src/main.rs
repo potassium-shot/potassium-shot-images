@@ -1,18 +1,32 @@
-use std::{borrow::Cow, io::BufWriter};
+use std::{
+    borrow::Cow,
+    io::BufWriter,
+    path::{Component, Path, PathBuf},
+    sync::LazyLock,
+};
 
+use anyhow::anyhow;
 use axum::{body::Body, http::header, response::Response, routing::get};
-use axum_anyhow::{ApiResult, ResultExt};
+use axum_anyhow::{ApiResult, IntoApiError, ResultExt};
 use image::DynamicImage;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
+use crate::{caching::ImageCache, config::Config, image_config::ImageConfig};
+
+mod caching;
+mod config;
 mod env;
+mod image_config;
+
+static CONFIG: LazyLock<Config> = LazyLock::new(Config::load_or_default);
+static IMAGE_CACHE: LazyLock<ImageCache> = LazyLock::new(ImageCache::default);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let bind_address = format!("{}:{}", *env::BIND_IP, *env::PORT);
+    let bind_address = format!("{}:{}", CONFIG.get_bind_ip(), CONFIG.get_port());
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
 
     let router = axum::Router::new().route("/{*path}", get(get_image));
@@ -34,20 +48,56 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 #[serde(default)]
 struct GetImageQueryParams {
     download: bool,
     file_name: Option<String>,
-    max_width: Option<u32>,
-    max_height: Option<u32>,
+    cache: bool,
+    #[serde(flatten)]
+    image_config: ImageConfig,
+}
+
+impl Default for GetImageQueryParams {
+    fn default() -> Self {
+        Self {
+            download: false,
+            file_name: None,
+            cache: true,
+            image_config: ImageConfig::default(),
+        }
+    }
 }
 
 async fn get_image(
     axum::extract::Path(path): axum::extract::Path<String>,
     axum::extract::Query(params): axum::extract::Query<GetImageQueryParams>,
 ) -> ApiResult<Response> {
-    let full_path = env::IMAGES_DIRECTORY.join(path);
+    let mut full_path_parts = Vec::new();
+
+    for component in CONFIG
+        .get_root_directory()
+        .components()
+        .chain(Path::new(path.as_str()).components())
+    {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                full_path_parts.pop();
+            }
+            other => full_path_parts.push(other),
+        }
+    }
+
+    let full_path = full_path_parts.into_iter().collect::<PathBuf>();
+
+    if !full_path.starts_with(CONFIG.get_root_directory()) {
+        return Err(
+            anyhow!("Forbidden pathm attempts to exit the images root directory.")
+                .context_forbidden("Checking if path is valid"),
+        );
+    }
+
     let mut file = tokio::fs::File::open(&full_path)
         .await
         .context_not_found("Finding the specified image file")?;
@@ -123,13 +173,20 @@ async fn get_image(
 
 impl GetImageQueryParams {
     fn require_treatment(&self) -> bool {
-        self.max_width.is_some() || self.max_height.is_some()
+        self.image_config != ImageConfig::default()
     }
 
     fn treat_image(&self, image: DynamicImage) -> DynamicImage {
-        image.thumbnail(
-            self.max_width.unwrap_or(u32::MAX),
-            self.max_height.unwrap_or(u32::MAX),
-        )
+        if let Some(cached) = IMAGE_CACHE.get_cached(&self.image_config) {
+            cached
+        } else {
+            let result = self.image_config.treat_image(image);
+
+            if self.cache {
+                IMAGE_CACHE.put(self.image_config.clone(), &result);
+            }
+
+            result
+        }
     }
 }
