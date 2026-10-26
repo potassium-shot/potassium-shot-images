@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use axum::{body::Body, http::header, response::Response, routing::get};
 use axum_anyhow::{ApiResult, IntoApiError, ResultExt};
 use image::DynamicImage;
@@ -26,6 +26,9 @@ static IMAGE_CACHE: LazyLock<ImageCache> = LazyLock::new(ImageCache::default);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+
+    std::fs::create_dir_all(CONFIG.get_images_directory()).context("Creating images directory.")?;
+    std::fs::create_dir_all(CONFIG.get_cache_directory()).context("Creating cache directory.")?;
 
     let bind_address = format!("{}:{}", CONFIG.get_bind_ip(), CONFIG.get_port());
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
