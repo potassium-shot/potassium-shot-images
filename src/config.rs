@@ -5,7 +5,7 @@ use std::{
 
 use serde::Deserialize;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Config {
     bind_ip: String,
@@ -50,8 +50,20 @@ impl Config {
 
     pub fn load_or_default() -> Self {
         Self::load().unwrap_or_else(|e| {
-            tracing::warn!("Couldn't load config file, using default config: {}", e);
-            Self::default()
+            tracing::warn!("Couldn't load config file, writing default config: {}", e);
+            let def = Self::default();
+
+            let try_write = || -> anyhow::Result<()> {
+                let s = toml::to_string_pretty(&def)?;
+                std::fs::write(&*crate::env::CONFIG_PATH, s)?;
+                Ok(())
+            };
+
+            if let Err(e) = try_write() {
+                tracing::error!("Couldn't write default config: {}", e);
+            }
+
+            def
         })
     }
 
