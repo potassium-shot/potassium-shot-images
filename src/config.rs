@@ -10,12 +10,13 @@ use serde::Deserialize;
 pub struct Config {
     bind_ip: String,
     port: u16,
-    root_directory: PathBuf,
+    images_directory: PathBuf,
+    cache_directory: PathBuf,
     #[serde(deserialize_with = "deserialize_duration")]
     pub memory_cache_duration: Duration,
     #[serde(deserialize_with = "deserialize_duration")]
     pub disk_cache_initial_duration: Duration,
-    pub disk_cache_multiplier: f32,
+    pub disk_cache_multiplier: u32,
     #[serde(deserialize_with = "deserialize_duration")]
     pub disk_cache_max_duration: Duration,
 }
@@ -25,10 +26,11 @@ impl Default for Config {
         Self {
             bind_ip: "0.0.0.0".into(),
             port: 3000,
-            root_directory: PathBuf::from("/usr/share/potassium-shot-images/images"),
-            memory_cache_duration: Duration::from_mins(10),
+            images_directory: PathBuf::from("/usr/share/potassium-shot-images/images"),
+            cache_directory: PathBuf::from("/usr/share/potassium-shot-images/cache"),
+            memory_cache_duration: Duration::from_mins(0),
             disk_cache_initial_duration: Duration::from_mins(10),
-            disk_cache_multiplier: 4.0,
+            disk_cache_multiplier: 4,
             disk_cache_max_duration: Duration::from_hours(72),
         }
     }
@@ -42,7 +44,7 @@ impl Config {
 
     pub fn load_or_default() -> Self {
         Self::load().unwrap_or_else(|e| {
-            tracing::error!("Couldn't load config file, using default config: {}", e);
+            tracing::warn!("Couldn't load config file, using default config: {}", e);
             Self::default()
         })
     }
@@ -58,11 +60,18 @@ impl Config {
         crate::env::PORT.unwrap_or(self.port)
     }
 
-    pub fn get_root_directory(&self) -> &Path {
+    pub fn get_images_directory(&self) -> &Path {
         crate::env::IMAGES_DIRECTORY
             .as_ref()
             .map(|p| p.as_path())
-            .unwrap_or(&self.root_directory)
+            .unwrap_or(&self.images_directory)
+    }
+
+    pub fn get_cache_directory(&self) -> &Path {
+        crate::env::CACHE_DIRECTORY
+            .as_ref()
+            .map(|p| p.as_path())
+            .unwrap_or(&self.cache_directory)
     }
 }
 

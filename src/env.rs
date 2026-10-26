@@ -15,6 +15,12 @@ pub static IMAGES_DIRECTORY: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
         .ok()
 });
 
+pub static CACHE_DIRECTORY: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+    std::env::var("POTASSIUM_SHOT_IMAGES_CACHE_DIRECTORY")
+        .map(PathBuf::from)
+        .ok()
+});
+
 pub static CONFIG_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     std::env::var("POTASSIUM_SHOT_IMAGES_CONFIG_PATH")
         .map(PathBuf::from)

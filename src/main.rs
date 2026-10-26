@@ -3,6 +3,7 @@ use std::{
     io::BufWriter,
     path::{Component, Path, PathBuf},
     sync::LazyLock,
+    time::Duration,
 };
 
 use anyhow::anyhow;
@@ -32,6 +33,13 @@ async fn main() -> anyhow::Result<()> {
     let router = axum::Router::new().route("/{*path}", get(get_image));
 
     tracing::info!("Listening on {}.", bind_address);
+
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            IMAGE_CACHE.update();
+        }
+    });
 
     tokio::select! {
         result = axum::serve(listener, router) => {
@@ -76,7 +84,7 @@ async fn get_image(
     let mut full_path_parts = Vec::new();
 
     for component in CONFIG
-        .get_root_directory()
+        .get_images_directory()
         .components()
         .chain(Path::new(path.as_str()).components())
     {
@@ -91,7 +99,7 @@ async fn get_image(
 
     let full_path = full_path_parts.into_iter().collect::<PathBuf>();
 
-    if !full_path.starts_with(CONFIG.get_root_directory()) {
+    if !full_path.starts_with(CONFIG.get_images_directory()) {
         return Err(
             anyhow!("Forbidden pathm attempts to exit the images root directory.")
                 .context_forbidden("Checking if path is valid"),
@@ -145,7 +153,7 @@ async fn get_image(
         );
 
     if params.require_treatment() {
-        let mut all_bytes = Vec::new();
+        let mut all_bytes = Vec::with_capacity(file_len as usize);
         file.read_to_end(&mut all_bytes)
             .await
             .context_internal("Reading image file before treatment")?;
@@ -178,8 +186,10 @@ impl GetImageQueryParams {
 
     fn treat_image(&self, image: DynamicImage) -> DynamicImage {
         if let Some(cached) = IMAGE_CACHE.get_cached(&self.image_config) {
+            tracing::warn!("Cache hit!");
             cached
         } else {
+            tracing::warn!("Cache miss!");
             let result = self.image_config.treat_image(image);
 
             if self.cache {
