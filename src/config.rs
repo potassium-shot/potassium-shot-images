@@ -14,11 +14,15 @@ pub struct Config {
     cache_directory: PathBuf,
     #[serde(deserialize_with = "deserialize_duration")]
     pub memory_cache_duration: Duration,
+    #[serde(deserialize_with = "deserialize_size")]
+    pub memory_cache_budget: u64,
     #[serde(deserialize_with = "deserialize_duration")]
     pub disk_cache_initial_duration: Duration,
     pub disk_cache_multiplier: u32,
     #[serde(deserialize_with = "deserialize_duration")]
     pub disk_cache_max_duration: Duration,
+    #[serde(deserialize_with = "deserialize_size")]
+    pub disk_cache_budget: u64,
 }
 
 impl Default for Config {
@@ -28,10 +32,12 @@ impl Default for Config {
             port: 3000,
             images_directory: PathBuf::from("/usr/share/potassium-shot-images/images"),
             cache_directory: PathBuf::from("/usr/share/potassium-shot-images/cache"),
-            memory_cache_duration: Duration::from_mins(0),
+            memory_cache_duration: Duration::from_mins(10),
+            memory_cache_budget: 32 * 1024 * 1024,
             disk_cache_initial_duration: Duration::from_mins(10),
             disk_cache_multiplier: 4,
             disk_cache_max_duration: Duration::from_hours(72),
+            disk_cache_budget: 512 * 1024 * 1024,
         }
     }
 }
@@ -80,4 +86,9 @@ fn deserialize_duration<'de, D: serde::Deserializer<'de>>(
 ) -> Result<Duration, D::Error> {
     let s = String::deserialize(deserializer)?;
     parse_duration::parse(s.as_str()).map_err(serde::de::Error::custom)
+}
+
+fn deserialize_size<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    let s = String::deserialize(deserializer)?;
+    parse_size::parse_size(s.as_str()).map_err(serde::de::Error::custom)
 }

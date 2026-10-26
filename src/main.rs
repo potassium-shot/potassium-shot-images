@@ -186,10 +186,10 @@ impl GetImageQueryParams {
 
     fn treat_image(&self, image: DynamicImage) -> DynamicImage {
         if let Some(cached) = IMAGE_CACHE.get_cached(&self.image_config) {
-            tracing::warn!("Cache hit!");
+            tracing::trace!("Cache hit!");
             cached
         } else {
-            tracing::warn!("Cache miss!");
+            tracing::trace!("Cache miss!");
             let result = self.image_config.treat_image(image);
 
             if self.cache {

@@ -128,6 +128,7 @@ impl DiskCache {
         }
 
         let mut to_remove = Vec::new();
+        let mut total_size = 0;
 
         for cached_image in self.cached_images.iter() {
             if cached_image.end_time < SystemTime::now() {
@@ -140,12 +141,48 @@ impl DiskCache {
                     },
                 );
                 Self::delete_image(cached_image.id);
+            } else {
+                match std::fs::metadata(IMAGES_PATH.join(format!("{}.png", cached_image.id))) {
+                    Ok(meta) => {
+                        total_size += meta.len();
+                    }
+                    Err(e) => tracing::error!("Couldn't get size of cached image: {}", e),
+                }
             }
         }
 
         for key in to_remove {
             self.cached_images.remove(&key);
             must_save = true;
+        }
+
+        if total_size as u64 > CONFIG.disk_cache_budget {
+            let mut images_by_age = self
+                .cached_images
+                .iter()
+                .map(|entry| (entry.end_time, entry.key().clone()))
+                .collect::<Vec<_>>();
+            images_by_age.sort_unstable_by_key(|(time, _)| *time);
+            images_by_age.reverse();
+
+            while total_size as u64 > CONFIG.disk_cache_budget {
+                let Some((_, key)) = images_by_age.pop() else {
+                    break;
+                };
+
+                let Some((_, cached_image)) = self.cached_images.remove(&key) else {
+                    continue;
+                };
+
+                match std::fs::metadata(IMAGES_PATH.join(format!("{}.png", cached_image.id))) {
+                    Ok(meta) => {
+                        total_size -= meta.len();
+                    }
+                    Err(e) => tracing::error!("Couldn't get size of cached image: {}", e),
+                }
+
+                Self::delete_image(cached_image.id);
+            }
         }
 
         if must_save {

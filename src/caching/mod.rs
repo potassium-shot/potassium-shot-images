@@ -44,15 +44,39 @@ impl ImageCache {
 
     pub fn update(&self) {
         let mut to_remove = Vec::new();
+        let mut total_size = 0;
 
         for cached_image in self.memory_cache.iter() {
             if cached_image.time + CONFIG.memory_cache_duration < Instant::now() {
                 to_remove.push(cached_image.key().clone());
+            } else {
+                total_size += cached_image.image.as_bytes().len();
             }
         }
 
         for key in to_remove {
             self.memory_cache.remove(&key);
+        }
+
+        if total_size as u64 > CONFIG.memory_cache_budget {
+            let mut images_by_age = self
+                .memory_cache
+                .iter()
+                .map(|entry| (entry.time, entry.key().clone()))
+                .collect::<Vec<_>>();
+            images_by_age.sort_unstable_by_key(|(time, _)| *time);
+            images_by_age.reverse();
+
+            while total_size as u64 > CONFIG.memory_cache_budget {
+                let Some((_, key)) = images_by_age.pop() else {
+                    break;
+                };
+
+                let Some((_, image)) = self.memory_cache.remove(&key) else {
+                    continue;
+                };
+                total_size -= image.image.as_bytes().len();
+            }
         }
 
         self.disk_cache.update();
