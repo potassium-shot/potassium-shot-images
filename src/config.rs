@@ -12,16 +12,31 @@ pub struct Config {
     port: u16,
     images_directory: PathBuf,
     cache_directory: PathBuf,
-    #[serde(deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub memory_cache_duration: Duration,
-    #[serde(deserialize_with = "deserialize_size")]
+    #[serde(
+        serialize_with = "serialize_size",
+        deserialize_with = "deserialize_size"
+    )]
     pub memory_cache_budget: u64,
-    #[serde(deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub disk_cache_initial_duration: Duration,
     pub disk_cache_multiplier: u32,
-    #[serde(deserialize_with = "deserialize_duration")]
+    #[serde(
+        serialize_with = "serialize_duration",
+        deserialize_with = "deserialize_duration"
+    )]
     pub disk_cache_max_duration: Duration,
-    #[serde(deserialize_with = "deserialize_size")]
+    #[serde(
+        serialize_with = "serialize_size",
+        deserialize_with = "deserialize_size"
+    )]
     pub disk_cache_budget: u64,
 }
 
@@ -55,6 +70,17 @@ impl Config {
 
             let try_write = || -> anyhow::Result<()> {
                 let s = toml::to_string_pretty(&def)?;
+
+                if std::fs::exists(&*crate::env::CONFIG_PATH).is_ok_and(std::convert::identity) {
+                    let mut bak_name = crate::env::CONFIG_PATH.clone();
+                    bak_name.add_extension(".bak");
+
+                    match std::fs::rename(&*crate::env::CONFIG_PATH, bak_name) {
+                        Ok(_) => tracing::warn!("Config file already existed, and was backed up."),
+                        Err(e) => tracing::error!("Could not back up existing config file: {}", e),
+                    }
+                }
+
                 std::fs::write(&*crate::env::CONFIG_PATH, s)?;
                 Ok(())
             };
@@ -91,6 +117,20 @@ impl Config {
             .map(|p| p.as_path())
             .unwrap_or(&self.cache_directory)
     }
+}
+
+fn serialize_duration<S>(dur: &Duration, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(format!("{}m", dur.as_secs() / 60).as_str())
+}
+
+fn serialize_size<S>(size: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(format!("{}MB", size / 1_048_576).as_str())
 }
 
 fn deserialize_duration<'de, D: serde::Deserializer<'de>>(
