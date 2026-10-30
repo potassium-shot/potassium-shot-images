@@ -9,7 +9,7 @@ use image::DynamicImage;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::{CONFIG, image_config::ImageConfig};
+use crate::{CONFIG, caching::ImageCacheKey};
 
 static INDEX_PATH: LazyLock<PathBuf> =
     LazyLock::new(|| CONFIG.get_cache_directory().join("index.bin"));
@@ -18,8 +18,8 @@ static IMAGES_PATH: LazyLock<PathBuf> =
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct DiskCache {
-    cached_images: DashMap<ImageConfig, DiskCachedImage>,
-    eligible_for_time_refresh: DashMap<ImageConfig, EligibleForTimeRefresh>,
+    cached_images: DashMap<ImageCacheKey, DiskCachedImage>,
+    eligible_for_time_refresh: DashMap<ImageCacheKey, EligibleForTimeRefresh>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -36,8 +36,8 @@ struct EligibleForTimeRefresh {
 }
 
 impl DiskCache {
-    pub fn get_cached(&self, config: &ImageConfig) -> Option<DynamicImage> {
-        let result = if let Some(mut cached_image) = self.cached_images.get_mut(config) {
+    pub fn get_cached(&self, ckey: &ImageCacheKey) -> Option<DynamicImage> {
+        let result = if let Some(mut cached_image) = self.cached_images.get_mut(ckey) {
             cached_image.last_duration = (cached_image.last_duration
                 * CONFIG.disk_cache_multiplier)
                 .min(CONFIG.disk_cache_max_duration);
@@ -65,10 +65,10 @@ impl DiskCache {
         result
     }
 
-    pub fn refresh_time(&self, config: &ImageConfig) {
+    pub fn refresh_time(&self, ckey: &ImageCacheKey) {
         let mut must_save = false;
 
-        if let Some(mut cached_image) = self.cached_images.get_mut(config) {
+        if let Some(mut cached_image) = self.cached_images.get_mut(ckey) {
             cached_image.last_duration = (cached_image.last_duration
                 * CONFIG.disk_cache_multiplier)
                 .min(CONFIG.disk_cache_max_duration);
@@ -81,9 +81,9 @@ impl DiskCache {
         }
     }
 
-    pub fn put(&self, config: ImageConfig, image: &DynamicImage) {
+    pub fn put(&self, ckey: ImageCacheKey, image: &DynamicImage) {
         let Some(id) = Self::save_image(image) else {
-            if let Some(mut time_limit) = self.eligible_for_time_refresh.get_mut(&config) {
+            if let Some(mut time_limit) = self.eligible_for_time_refresh.get_mut(&ckey) {
                 time_limit.last_duration = (time_limit.last_duration
                     * CONFIG.disk_cache_multiplier)
                     .min(CONFIG.disk_cache_max_duration);
@@ -93,15 +93,14 @@ impl DiskCache {
             return;
         };
 
-        let duration = if let Some((_, time_limit)) = self.eligible_for_time_refresh.remove(&config)
-        {
+        let duration = if let Some((_, time_limit)) = self.eligible_for_time_refresh.remove(&ckey) {
             time_limit.last_duration
         } else {
             CONFIG.disk_cache_initial_duration
         };
 
         self.cached_images.insert(
-            config,
+            ckey,
             DiskCachedImage {
                 end_time: SystemTime::now() + duration,
                 last_duration: duration,
@@ -156,7 +155,7 @@ impl DiskCache {
             must_save = true;
         }
 
-        if total_size as u64 > CONFIG.disk_cache_budget {
+        if total_size > CONFIG.disk_cache_budget {
             let mut images_by_age = self
                 .cached_images
                 .iter()
@@ -165,7 +164,7 @@ impl DiskCache {
             images_by_age.sort_unstable_by_key(|(time, _)| *time);
             images_by_age.reverse();
 
-            while total_size as u64 > CONFIG.disk_cache_budget {
+            while total_size > CONFIG.disk_cache_budget {
                 let Some((_, key)) = images_by_age.pop() else {
                     break;
                 };
@@ -258,9 +257,9 @@ impl DiskCache {
                 let r#type = image.file_type()?;
 
                 if r#type.is_dir() {
-                    std::fs::remove_dir_all(&image.path())?;
+                    std::fs::remove_dir_all(image.path())?;
                 } else {
-                    std::fs::remove_file(&image.path())?;
+                    std::fs::remove_file(image.path())?;
                 }
             }
 

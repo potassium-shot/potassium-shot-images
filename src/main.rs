@@ -163,7 +163,7 @@ async fn get_image(
 
         let image = image::load_from_memory_with_format(&all_bytes, guessed_format)
             .context_internal("Decoding image data")?;
-        let image = params.treat_image(image);
+        let image = params.treat_image(full_path, image);
 
         all_bytes.clear();
 
@@ -187,8 +187,8 @@ impl GetImageQueryParams {
         self.image_config != ImageConfig::default()
     }
 
-    fn treat_image(&self, image: DynamicImage) -> DynamicImage {
-        if let Some(cached) = IMAGE_CACHE.get_cached(&self.image_config) {
+    fn treat_image(&self, path: PathBuf, image: DynamicImage) -> DynamicImage {
+        if let Some(cached) = IMAGE_CACHE.get_cached(path.clone(), &self.image_config) {
             tracing::trace!("Cache hit!");
             cached
         } else {
@@ -196,7 +196,7 @@ impl GetImageQueryParams {
             let result = self.image_config.treat_image(image);
 
             if self.cache {
-                IMAGE_CACHE.put(self.image_config.clone(), &result);
+                IMAGE_CACHE.put(path, self.image_config.clone(), &result);
             }
 
             result

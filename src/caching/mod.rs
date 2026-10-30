@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{path::PathBuf, time::Instant};
 
 use dashmap::DashMap;
 use image::DynamicImage;
@@ -7,34 +7,48 @@ use crate::{CONFIG, image_config::ImageConfig};
 
 mod disk_cache;
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Hash, Debug)]
+struct ImageCacheKey {
+    path: PathBuf,
+    config: ImageConfig,
+}
+
 #[derive(Default)]
 pub struct ImageCache {
-    memory_cache: DashMap<ImageConfig, MemoryCachedImage>,
+    memory_cache: DashMap<ImageCacheKey, MemoryCachedImage>,
     disk_cache: disk_cache::DiskCache,
 }
 
 impl ImageCache {
-    pub fn get_cached(&self, config: &ImageConfig) -> Option<DynamicImage> {
-        if let Some(mut cached_image) = self.memory_cache.get_mut(config) {
+    pub fn get_cached(&self, path: PathBuf, config: &ImageConfig) -> Option<DynamicImage> {
+        let ckey = ImageCacheKey {
+            path,
+            config: config.clone(),
+        };
+        if let Some(mut cached_image) = self.memory_cache.get_mut(&ckey) {
             cached_image.time = Instant::now();
-            self.disk_cache.refresh_time(config);
+            self.disk_cache.refresh_time(&ckey);
             Some(cached_image.image.clone())
-        } else if let Some(cached_image) = self.disk_cache.get_cached(config) {
-            self.put_memory_only(config.clone(), &cached_image);
+        } else if let Some(cached_image) = self.disk_cache.get_cached(&ckey) {
+            self.put_memory_only(ckey, &cached_image);
             Some(cached_image)
         } else {
             None
         }
     }
 
-    pub fn put(&self, config: ImageConfig, image: &DynamicImage) {
-        self.put_memory_only(config.clone(), image);
-        self.disk_cache.put(config, image);
+    pub fn put(&self, path: PathBuf, config: ImageConfig, image: &DynamicImage) {
+        let ckey = ImageCacheKey {
+            path,
+            config: config.clone(),
+        };
+        self.put_memory_only(ckey.clone(), image);
+        self.disk_cache.put(ckey, image);
     }
 
-    fn put_memory_only(&self, config: ImageConfig, image: &DynamicImage) {
+    fn put_memory_only(&self, ckey: ImageCacheKey, image: &DynamicImage) {
         self.memory_cache.insert(
-            config.clone(),
+            ckey,
             MemoryCachedImage {
                 time: Instant::now(),
                 image: image.clone(),
