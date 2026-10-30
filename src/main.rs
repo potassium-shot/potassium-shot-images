@@ -12,6 +12,7 @@ use axum_anyhow::{ApiResult, IntoApiError, ResultExt};
 use image::DynamicImage;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::{caching::ImageCache, config::Config, image_config::ImageConfig};
 
@@ -33,7 +34,10 @@ async fn main() -> anyhow::Result<()> {
     let bind_address = format!("{}:{}", CONFIG.get_bind_ip(), CONFIG.get_port());
     let listener = tokio::net::TcpListener::bind(&bind_address).await?;
 
-    let router = axum::Router::new().route("/{*path}", get(get_image));
+    let cors = CorsLayer::new().allow_origin(Any);
+    let router = axum::Router::new()
+        .route("/{*path}", get(get_image))
+        .layer(cors);
 
     tracing::info!("Listening on {}.", bind_address);
 
